@@ -13,34 +13,39 @@
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
  * along with this program. If not, see <https://www.gnu.org/licenses/>.
- *
- * World of Warcraft, and all World of Warcraft or Warcraft art, images,
- * and lore are copyrighted by Blizzard Entertainment, Inc.
  */
 
-#ifndef MANGOS_H_WORLDGATEWAY_ACCOUNT
-#define MANGOS_H_WORLDGATEWAY_ACCOUNT
+#ifndef MANGOS_WARDEN_CHECK_PLAN_H
+#define MANGOS_WARDEN_CHECK_PLAN_H
 
-#include <string>
+#include "WardenCheckCatalog.h"
 
-class Field;
+#include <vector>
 
-enum class AccountRestriction
+namespace warden
 {
-    None,
-    Banned,
-    LockedAddressMismatch,
-    UnsupportedOperatingSystem
+/** Server-only purpose metadata; it is never encoded into the Warden body. */
+enum class CheckPlanPurpose : uint8
+{
+    Initial,
+    Recurring,
+    AggressiveImmediate,
+    AggressiveRecurring,
+    Confirmation
 };
 
-AccountRestriction EvaluateAccountRestriction(
-    Field const* fields, std::string const& peerAddress);
-std::string ReadWardenPlatformHint(Field const* fields);
-std::string ReadWardenClientLocale(Field const* fields);
+/** Immutable ordered request contract retained until its matching response. */
+struct CheckPlan
+{
+    uint32 requestId = 0;
+    CheckPlanPurpose purpose = CheckPlanPurpose::Initial;
+    std::vector<WardenCheckDefinition> checks;
+};
+}
 
 #endif

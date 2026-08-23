@@ -35,6 +35,7 @@
 #include "Common/Locales.h"
 #include <list>
 #include "SessionProtocolPolicy.h"
+#include "WardenConfiguration.h"
 #include "Auth/BigNumber.h"
 #include "SharedDefines.h"
 #include "ObjectGuid.h"
@@ -46,6 +47,7 @@ struct ItemPrototype;
 #include <memory>
 #include <ctime>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -74,6 +76,17 @@ struct OpcodeHandler;
 namespace proto
 {
 class IClientLink;
+}
+
+namespace warden
+{
+enum class WardenFailure : uint8;
+struct AdmissionData;
+struct WardenEvidenceBatch;
+struct WardenLifecycleEvent;
+struct WardenPolicyDecision;
+class WardenEnforcementPolicy;
+class WardenServer;
 }
 
 /**
@@ -269,6 +282,10 @@ class WorldSession
         WorldSession(uint32 id, std::shared_ptr<proto::IClientLink> link,
                      std::shared_ptr<SessionMailbox> mailbox, AccountTypes sec,
                      uint8 expansion, time_t mute_time, LocaleConstant locale);
+        WorldSession(uint32 id, std::shared_ptr<proto::IClientLink> link,
+                     std::shared_ptr<SessionMailbox> mailbox, AccountTypes sec,
+                     uint8 expansion, time_t mute_time, LocaleConstant locale,
+                     warden::AdmissionData&& admission);
 
         /**
          * @brief Destructor
@@ -307,6 +324,9 @@ class WorldSession
         void SendPacket(WorldPacket const* packet);
         void SetPendingAddonInfo(std::unique_ptr<WorldPacket> packet);
         void SendPendingAddonInfo();
+        void OnAuthenticatedAdmission();
+        void StartWardenBootstrap();
+        void UpdateWarden(uint32 diffMs);
         void SendNotification(const char* format, ...) ATTR_PRINTF(2, 3);
         void SendNotification(int32 string_id, ...);
         void SendPetNameInvalid(uint32 error, const std::string& name, DeclinedName* declinedName);
@@ -494,6 +514,10 @@ class WorldSession
         int GetSessionDbLocaleIndex() const
         {
             return m_sessionDbLocaleIndex;
+        }
+        std::string const& GetClientLocale() const
+        {
+            return m_clientLocale;
         }
         const char* GetMangosString(int32 entry) const;
 
@@ -967,6 +991,32 @@ class WorldSession
         void HandlePingOpcode(WorldPacket& recv_data);
         void HandleKeepAliveOpcode(WorldPacket& recv_data);
     private:
+        // Warden callbacks cross from the pure protocol/state machine into the
+        // account, persistence, logging, and connection policy owned here.
+        void HandleWardenLifecycle(
+            warden::WardenLifecycleEvent const& event);
+        void HandleWardenEvidenceBatch(
+            warden::WardenEvidenceBatch const& batch);
+        void ApplyWardenPolicyDecisions(
+            std::vector<warden::WardenPolicyDecision> const& decisions);
+        // Converts abandoned confirmations into non-actionable Unavailable
+        // audit rows before any lifecycle path destroys policy ownership.
+        void DrainWardenPendingConfirmations();
+        // Observer callbacks request teardown; the outer entry-point wrapper
+        // performs it after WardenServer has returned and cannot self-delete.
+        void RequestWardenDisengagement();
+        void FinalizeWardenDisengagement();
+        bool m_wardenDisengagementRequested = false;
+        // Confirmed non-actionable check evidence.
+        void PersistWardenAudit(
+            warden::WardenPolicyDecision const& decision);
+        // Session-level protocol/lifecycle shed, never enforcement evidence.
+        void PersistWardenOperationalAudit(
+            warden::WardenFailure failure);
+        // Confirmed actionable evidence; durable write is attempted before kick.
+        void PersistWardenIncidentAndKick(
+            warden::WardenPolicyDecision const& decision);
+
         // private trade methods
         void moveItems(Item* myItems[], Item* hisItems[]);
         bool VerifyMovementInfo(MovementInfo const& movementInfo, ObjectGuid const& guid) const;
@@ -985,6 +1035,17 @@ class WorldSession
         /// Shared queue used by the network gateway without exposing this session.
         std::shared_ptr<SessionMailbox> m_mailbox;
         std::unique_ptr<WorldPacket> m_pendingAddonInfo;
+        std::unique_ptr<warden::AdmissionData> m_pendingWardenAdmission;
+        std::unique_ptr<warden::WardenServer> m_warden;
+        std::unique_ptr<warden::WardenEnforcementPolicy> m_wardenPolicy;
+        warden::WardenConfiguration m_wardenConfiguration;
+        uint32 m_wardenBuild = 0;
+        std::string m_clientPlatform;
+        std::string m_clientLocale;
+        uint64 m_wardenAggressiveUntil = 0;
+        bool m_wardenAggressive = false;
+        std::unordered_set<uint64> m_wardenLoggedAnomalies;
+        bool m_wardenAdmissionHandled;
         std::string m_Address;
 
         AccountTypes _security;

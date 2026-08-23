@@ -366,6 +366,7 @@ World::AddSession_(WorldSession* s)
     packet << uint8(s->Expansion());                        // 0 - normal, 1 - TBC. Must be set in database manually for each account.
     s->SendPacket(&packet);
     s->SendPendingAddonInfo();
+    s->OnAuthenticatedAdmission();
 
     UpdateMaxSessionCounters();
 
@@ -2086,7 +2087,7 @@ void World::UpdateSimulation(uint32 diff)
 /**
  * @brief Updates all active sessions and integrates newly queued ones.
  */
-void World::UpdateSessions(uint32 /*diff*/)
+void World::UpdateSessions(uint32 diff)
 {
     ///- Add new sessions
     WorldSession* sess;
@@ -2103,6 +2104,10 @@ void World::UpdateSessions(uint32 /*diff*/)
         ///- and remove not active sessions from the list
         WorldSession* pSession = itr->second;
         WorldSessionFilter updater(pSession);
+
+        // Charge the elapsed interval to the state that owned it before a
+        // packet handler can advance Warden and create a fresh deadline.
+        pSession->UpdateWarden(diff);
 
         if (!pSession->Update(updater))
         {
